@@ -13,6 +13,8 @@ import (
 
 	"github.com/hangarbay/parley.mcp/internal/ask"
 	"github.com/hangarbay/parley.mcp/internal/chatgpt"
+	"github.com/hangarbay/parley.mcp/internal/decide"
+	"github.com/hangarbay/parley.mcp/internal/diagnose"
 	"github.com/hangarbay/parley.mcp/internal/plan"
 	"github.com/hangarbay/parley.mcp/internal/review"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -32,6 +34,10 @@ func run() int {
 	switch cmd {
 	case "ask":
 		return askCmd(args)
+	case "decide":
+		return decideCmd(args)
+	case "diagnose":
+		return diagnoseCmd(args)
 	case "serve":
 		return serveCmd(args)
 	case "probe":
@@ -54,11 +60,13 @@ func usage() {
 	fmt.Fprint(os.Stderr, `parley-mcp - ask external AIs (Gemini, ChatGPT) via their free web UIs
 
 Usage:
-  parley-mcp ask [-provider gemini|chatgpt|both] [-prompt STRING]  Ask one or both providers (CLI one-shot)
-  parley-mcp plan [-provider gemini|chatgpt|both] [-task STRING]   Plan a project or task breakdown
-  parley-mcp review [-provider gemini|chatgpt|both] [-diff FILE] Review a diff, plan, or change
-  parley-mcp serve                                           Run the MCP stdio server (tools: ask, plan, review)
-  parley-mcp probe                                           Diagnose the anonymous ChatGPT session
+  parley-mcp ask [-provider gemini|chatgpt|both] [-prompt STRING]        Ask one or both providers (CLI one-shot)
+  parley-mcp decide [-provider gemini|chatgpt|both] [-question STRING]  Choose one of several known options
+  parley-mcp diagnose [-provider gemini|chatgpt|both] [-problem STRING] Rank causes of a failure
+  parley-mcp plan [-provider gemini|chatgpt|both] [-task STRING]        Plan a project or task breakdown
+  parley-mcp review [-provider gemini|chatgpt|both] [-diff FILE]        Review a diff, plan, or change
+  parley-mcp serve                                                      Run the MCP stdio server (tools: ask, decide, diagnose, plan, review)
+  parley-mcp probe                                                      Diagnose the anonymous ChatGPT session
 
 Providers:
   gemini    Google Gemini (AI Mode). Bootstraps a session via headless Firefox; set FIREFOX_PATH to override.
@@ -113,9 +121,85 @@ func newServer() *mcp.Server {
 		Version: "0.1.0",
 	}, nil)
 	ask.Register(server)
+	decide.Register(server)
+	diagnose.Register(server)
 	plan.Register(server)
 	review.Register(server)
 	return server
+}
+
+func decideCmd(args []string) int {
+	fs := flag.NewFlagSet("decide", flag.ContinueOnError)
+	provider := fs.String("provider", "both", "which providers decide: gemini, chatgpt, or both")
+	question := fs.String("question", "", "the decision to make")
+	options := fs.String("options", "", "the alternatives to choose between, one per line")
+	criteria := fs.String("criteria", "", "criteria the choice must be judged against")
+	constraints := fs.String("constraints", "", "hard constraints the choice must satisfy")
+	contextStr := fs.String("context", "", "project context to ground the decision")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *question == "" && len(fs.Args()) > 0 {
+		*question = strings.Join(fs.Args(), " ")
+	}
+	if *question == "" {
+		fmt.Fprintln(os.Stderr, "missing -question")
+		return 2
+	}
+	if *options == "" {
+		fmt.Fprintln(os.Stderr, "missing -options")
+		return 2
+	}
+
+	text, err := decide.Run(context.Background(), decide.Options{
+		Question:    *question,
+		Options:     *options,
+		Criteria:    *criteria,
+		Constraints: *constraints,
+		Context:     *contextStr,
+		Provider:    *provider,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	fmt.Println(text)
+	return 0
+}
+
+func diagnoseCmd(args []string) int {
+	fs := flag.NewFlagSet("diagnose", flag.ContinueOnError)
+	provider := fs.String("provider", "both", "which providers diagnose: gemini, chatgpt, or both")
+	problem := fs.String("problem", "", "the failure or unexpected behavior observed")
+	observations := fs.String("observations", "", "logs, errors, or measurements gathered so far")
+	attempts := fs.String("attempts", "", "fixes already tried and what happened")
+	environment := fs.String("environment", "", "relevant environment or version details")
+	contextStr := fs.String("context", "", "project context to ground the diagnosis")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *problem == "" && len(fs.Args()) > 0 {
+		*problem = strings.Join(fs.Args(), " ")
+	}
+	if *problem == "" {
+		fmt.Fprintln(os.Stderr, "missing -problem")
+		return 2
+	}
+
+	text, err := diagnose.Run(context.Background(), diagnose.Options{
+		Problem:      *problem,
+		Observations: *observations,
+		Attempts:     *attempts,
+		Environment:  *environment,
+		Context:      *contextStr,
+		Provider:     *provider,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	fmt.Println(text)
+	return 0
 }
 
 func planCmd(args []string) int {

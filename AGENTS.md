@@ -2,12 +2,15 @@
 
 ## What this is
 
-`parley.mcp` is a Go MCP (Model Context Protocol) server that exposes two tools
+`parley.mcp` is a Go MCP (Model Context Protocol) server that exposes five tools
 so an AI agent can consult external AIs for a second opinion **without API
-keys**: `ask` (fan a question out to one or both providers) and `review` (send a
-diff, plan, or change to one or both providers for a verdict). The providers are
-`gemini` (Google Gemini "AI Mode" via the free web UI, needs headless Firefox)
-and `chatgpt` (anonymous chatgpt.com web UI, plain HTTP).
+keys**: `ask` (fan a question out to one or both providers), `decide` (commit to
+one of several known options against explicit criteria), `diagnose` (rank
+competing causes of a failure and propose tests that distinguish them), `plan`
+(turn a task into a phased breakdown), and `review` (send a diff, plan, or change
+to one or both providers for a verdict). The providers are `gemini` (Google
+Gemini "AI Mode" via the free web UI, needs headless Firefox) and `chatgpt`
+(anonymous chatgpt.com web UI, plain HTTP).
 
 Both integrations drive **undocumented, free web UIs**. They are inherently
 brittle: token names, sentinel SDK versions, and affinity formats rotate
@@ -26,14 +29,19 @@ make docker           # docker build -t parley.mcp:local .
 go run ./cmd/parley-mcp serve                 # MCP stdio server (the production entrypoint)
 go run ./cmd/parley-mcp ask -prompt "..."                    # both providers (default)
 go run ./cmd/parley-mcp ask -provider gemini -prompt "..."   # just one
+go run ./cmd/parley-mcp decide -question "..." -options "..."  # choose between known options
+go run ./cmd/parley-mcp diagnose -problem "..."              # rank causes of a failure
+go run ./cmd/parley-mcp plan -task "..."                     # phased breakdown (or use -context)
 go run ./cmd/parley-mcp review -diff changes.diff            # review a diff (or pipe on stdin)
 go run ./cmd/parley-mcp probe                 # step-by-step diagnostic of the anonymous ChatGPT session
 ```
 
 - `make test` runs `go vet` too; unit tests cover `internal/dispatch` (resolve,
-  fan-out concurrency, formatting), `internal/ask`, and `internal/review`
-  (prompt composition, validation). The provider packages have no unit tests;
-  their coverage is the integration suite behind a `//go:build integration` tag.
+  fan-out concurrency, formatting) and every tool package (`internal/ask`,
+  `internal/decide`, `internal/diagnose`, `internal/plan`, `internal/review`)
+  for prompt composition and validation. The provider packages have no unit
+  tests; their coverage is the integration suite behind a `//go:build integration`
+  tag.
 - `make integ` hits live providers and needs network access; the Gemini case
   also needs Firefox. It drives both providers through the real MCP surface
   (in-memory transport) and asserts a sentinel token comes back in the answer.
@@ -48,12 +56,17 @@ go run ./cmd/parley-mcp probe                 # step-by-step diagnostic of the a
 
 ```
 cmd/parley-mcp/     Thin CLI + MCP wiring. main.go only: newServer() registers
-                    the tools; commands: ask | serve | probe | review.
+                    the tools; commands: ask | decide | diagnose | plan | serve
+                    | probe | review.
 internal/gemini/    gemini provider (self-contained; exports Ask)
 internal/chatgpt/   chatgpt provider (self-contained; exports Ask, Probe)
 internal/dispatch/  Shared fan-out layer: provider registry, Resolve, FanOut
                     (one goroutine per provider), Format. No MCP dependencies.
 internal/ask/       ask tool: fans a prompt out via dispatch and formats results.
+internal/decide/    decide tool: committed recommendation among enumerated options.
+internal/diagnose/  diagnose tool: ranked causes of a failure plus discriminating
+                    tests.
+internal/plan/      plan tool: phased breakdown of a project or task.
 internal/review/    review tool: composes a review prompt from a diff, context,
                     and rules, then fans it out via dispatch.
 internal/httpx/     ReadBody: reads response body, auto-decompresses gzip.
@@ -99,25 +112,31 @@ independent); the conduit token and requirements token are combined before
   `FanOut` runs every named provider in its own goroutine and returns results in
   request order; `Format` renders single answers bare and multi answers under
   `## Gemini` / `## ChatGPT` headings, annotating unavailable providers inline.
-- `registry` (dispatch) and `fanOut` (ask/review) are package vars so tests can
-  substitute fakes without network access.
+- `registry` (dispatch) and `fanOut` (every tool package) are package vars so
+  tests can substitute fakes without network access.
 
-**Tools** (`internal/ask`, `internal/review`):
-- Each `Register` adds a tool and a matching prompt. `ask.Run(ctx, prompt,
-  provider)` validates, resolves, fans out, formats. `review.Run(ctx,
-  Options{Diff, Context, Rules, Provider})` validates a non-empty diff, builds a
-  prompt (reviewer role, optional context/rules sections, the diff in a fenced
-  block, a fixed four-section response template), then fans out and formats.
-- Both tools default `provider` to both. They never talk to the web directly:
+**Tools** (`internal/ask`, `internal/decide`, `internal/diagnose`,
+`internal/plan`, `internal/review`):
+- Each `Register` adds a tool and a matching prompt. Every tool follows the same
+  shape: a `Run(ctx, Options{...})` that validates the required fields, resolves
+  the provider, composes a prompt (role string, optional context/rules sections,
+  a fixed numbered response template), fans out, and formats.
+- `ask.Run(ctx, prompt, provider)` is the generic case and takes plain args.
+  `decide` requires `question` + `options`; `diagnose` requires `problem`;
+  `plan` requires `task`; `review` requires `diff`.
+- All tools default `provider` to both. They never talk to the web directly:
   they build a prompt and hand it to dispatch.
 
 ## Gotchas and non-obvious patterns
 
-- **Tools, not providers, own MCP registration.** `internal/ask` and
-  `internal/review` each register both a tool and a same-named prompt. Provider
+- **Tools, not providers, own MCP registration.** Every tool package
+  (`internal/ask`, `internal/decide`, `internal/diagnose`, `internal/plan`,
+  `internal/review`) registers both a tool and a same-named prompt. Provider
   packages (`gemini`, `chatgpt`) are pure: they export `Ask` (and chatgpt also
   `Probe`) and register nothing. To add a provider, extend `internal/dispatch`'s
   `registry`; the tools pick it up automatically and `both` will include it.
+  Adding a tool is likewise mechanical: a new `internal/<name>` package with the
+  standard shape, then register it in `newServer()`.
 - **Fan-out is best-effort and order-preserving.** `dispatch.FanOut` uses one
   goroutine per provider; a failure in one is captured in that `Result.Err` and
   never cancels the others. Results are indexed by request position, not map
