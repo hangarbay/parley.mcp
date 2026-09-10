@@ -13,6 +13,7 @@ import (
 
 	"github.com/hangarbay/parley.mcp/internal/ask"
 	"github.com/hangarbay/parley.mcp/internal/chatgpt"
+	"github.com/hangarbay/parley.mcp/internal/plan"
 	"github.com/hangarbay/parley.mcp/internal/review"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -35,6 +36,8 @@ func run() int {
 		return serveCmd(args)
 	case "probe":
 		return probeCmd(args)
+	case "plan":
+		return planCmd(args)
 	case "review":
 		return reviewCmd(args)
 	case "-h", "--help", "help":
@@ -52,8 +55,9 @@ func usage() {
 
 Usage:
   parley-mcp ask [-provider gemini|chatgpt|both] [-prompt STRING]  Ask one or both providers (CLI one-shot)
+  parley-mcp plan [-provider gemini|chatgpt|both] [-task STRING]   Plan a project or task breakdown
   parley-mcp review [-provider gemini|chatgpt|both] [-diff FILE] Review a diff, plan, or change
-  parley-mcp serve                                           Run the MCP stdio server (tools: ask, review)
+  parley-mcp serve                                           Run the MCP stdio server (tools: ask, plan, review)
   parley-mcp probe                                           Diagnose the anonymous ChatGPT session
 
 Providers:
@@ -109,8 +113,40 @@ func newServer() *mcp.Server {
 		Version: "0.1.0",
 	}, nil)
 	ask.Register(server)
+	plan.Register(server)
 	review.Register(server)
 	return server
+}
+
+func planCmd(args []string) int {
+	fs := flag.NewFlagSet("plan", flag.ContinueOnError)
+	provider := fs.String("provider", "both", "which providers plan the task: gemini, chatgpt, or both")
+	contextStr := fs.String("context", "", "project context to ground the plan")
+	task := fs.String("task", "", "the project or task to plan")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *task == "" {
+		if len(fs.Args()) > 0 {
+			*task = strings.Join(fs.Args(), " ")
+		}
+	}
+	if *task == "" {
+		fmt.Fprintln(os.Stderr, "missing -task")
+		return 2
+	}
+
+	text, err := plan.Run(context.Background(), plan.Options{
+		Task:     *task,
+		Context:  *contextStr,
+		Provider: *provider,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	fmt.Println(text)
+	return 0
 }
 
 func reviewCmd(args []string) int {
