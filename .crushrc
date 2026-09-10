@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Project-local Crush config for parley.mcp (a Go project).
+# gopls only applies to a Go repo, so it is defined here rather than in the
+# global crushrc.
+
+lsp add gopls --command "$HOME/go/bin/gopls" --filetypes go --filetypes gomod --filetypes gowork --filetypes gotmpl --root-markers go.work --root-markers go.mod --root-markers .git
