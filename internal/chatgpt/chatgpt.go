@@ -22,6 +22,7 @@ import (
 
 	"github.com/hangarbay/parley.mcp/internal/extract"
 	"github.com/hangarbay/parley.mcp/internal/httpx"
+	"golang.org/x/net/html"
 )
 
 const (
@@ -107,6 +108,10 @@ func (c *client) ask(ctx context.Context, prompt string) (string, error) {
 	fragment, err := c.fetchAnswer(ctx, traceID, prep, prompt)
 	if err != nil {
 		return "", fmt.Errorf("fetch answer: %w", err)
+	}
+
+	if reason := turnFailure(fragment); reason != "" {
+		return "", fmt.Errorf("chatgpt rejected the prompt: %s", reason)
 	}
 
 	text := extractText(fragment)
@@ -594,4 +599,37 @@ func extractText(fragment string) string {
 		return ""
 	}
 	return extract.DedupeLines(extract.Strip(extract.Nodes(fragment, extract.Stream), chatgptBoilerplate...))
+}
+
+// reFailedConversation matches the control frame ChatGPT emits when it rejects
+// a turn, for example when the prompt exceeds the free web UI's size limit and
+// the server answers "Invalid prompt". The message is carried in the
+// HTML-escaped JSON of the data-conversation attribute.
+var reFailedConversation = regexp.MustCompile(`data-conversation-control="failed"[^>]*data-conversation="([^"]*)"`)
+
+// turnFailure returns the server's rejection message when the response reports a
+// failed turn, or "" for a normal response. Surfacing it keeps a rejected prompt
+// from being reported as the generic "empty response from ChatGPT". Only the
+// assistant message is returned: the failed conversation also repeats the user's
+// prompt, which must never be echoed back as the error.
+func turnFailure(fragment string) string {
+	if !strings.Contains(fragment, `data-conversation-control="failed"`) {
+		return ""
+	}
+	if m := reFailedConversation.FindStringSubmatch(fragment); m != nil {
+		var conv struct {
+			Messages []struct {
+				Content string `json:"content"`
+				Role    string `json:"role"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal([]byte(html.UnescapeString(m[1])), &conv); err == nil {
+			for _, msg := range conv.Messages {
+				if msg.Role == "assistant" && msg.Content != "" {
+					return msg.Content
+				}
+			}
+		}
+	}
+	return "the request was rejected"
 }

@@ -39,9 +39,9 @@ go run ./cmd/parley-mcp probe                 # step-by-step diagnostic of the a
 - `make test` runs `go vet` too; unit tests cover `internal/dispatch` (resolve,
   fan-out concurrency, formatting) and every tool package (`internal/ask`,
   `internal/decide`, `internal/diagnose`, `internal/plan`, `internal/review`)
-  for prompt composition and validation. The provider packages have no unit
-  tests; their coverage is the integration suite behind a `//go:build integration`
-  tag.
+  for prompt composition and validation. The provider packages have focused
+  unit tests for prompt-size and rejection handling; their end-to-end coverage
+  is the integration suite behind a `//go:build integration` tag.
 - `make integ` hits live providers and needs network access; the Gemini case
   also needs Firefox. It drives both providers through the real MCP surface
   (in-memory transport) and asserts a sentinel token comes back in the answer.
@@ -157,6 +157,15 @@ independent); the conduit token and requirements token are combined before
   the recent commit "Fix leaked stream prefixes and page chrome in answers" —
   this is an ongoing maintenance area. `make integ` + the sentinel echo test
   is how you verify extraction is clean.
+- **Prompt size limits differ per provider.** Gemini carries the prompt in the
+  GET query string, so Google answers 400 Bad Request once the request URI
+  reaches 16384 bytes; `checkRequestURL` rejects such prompts with a clear
+  error, meaning a review diff beyond ~12 KB cannot go through Gemini at all.
+  ChatGPT carries the prompt in the POST body but still caps its size: an
+  oversized prompt arrives as an HTTP 200 stream whose
+  `conversation-partial-control` frame is `failed`. `turnFailure` surfaces the
+  assistant message (`Invalid prompt`, `Chat is temporarily unavailable...`)
+  instead of the old generic `empty response from ChatGPT`.
 - **Sentinel PoW is a faithful Go port of the JS FNV-1a 32-bit hash** with the
   avalanche finalizer, in `internal/chatgpt/sentinel.go`. `fnv1aHash` and
   `imul32` must stay bit-exact with the browser JS. Token formats:

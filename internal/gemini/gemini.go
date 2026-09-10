@@ -20,7 +20,23 @@ import (
 const (
 	firefoxUA      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0"
 	requestTimeout = 60 * time.Second
+
+	// maxRequestURL is the longest request URI Google accepts before it answers
+	// 400 Bad Request. The prompt is carried in the query string, so it and the
+	// rest of the URL-encoded query must stay under this bound.
+	maxRequestURL = 16384
 )
+
+// checkRequestURL rejects a request whose URI exceeds Google's limit. Without
+// it an oversized prompt surfaces as a misleading "missing required tokens"
+// error (Google replies 400 with an error page) or a bare "write: broken pipe"
+// once the request line is large enough for the connection to be reset.
+func checkRequestURL(reqURL string) error {
+	if len(reqURL) >= maxRequestURL {
+		return fmt.Errorf("prompt too large for the Gemini web UI: request URL is %d bytes and Google rejects URLs of %d bytes or more; shorten the prompt or use another provider", len(reqURL), maxRequestURL)
+	}
+	return nil
+}
 
 // Ask sends prompt to Gemini and returns its answer as plain text.
 func Ask(ctx context.Context, prompt string) (string, error) {
@@ -73,6 +89,9 @@ func (c *geminiClient) fetchTokens(ctx context.Context, prompt string) (map[stri
 	params.Set("biw", "1073")
 	params.Set("bih", "883")
 	reqURL := "https://www.google.com/search?" + params.Encode()
+	if err := checkRequestURL(reqURL); err != nil {
+		return nil, err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
@@ -172,6 +191,9 @@ func (c *geminiClient) fetchAnswer(ctx context.Context, tokens map[string]string
 	params.Set("async", asyncVal)
 
 	reqURL := "https://www.google.com/async/folwr?" + params.Encode()
+	if err := checkRequestURL(reqURL); err != nil {
+		return "", err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
