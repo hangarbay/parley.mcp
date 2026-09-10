@@ -15,17 +15,79 @@ import (
 )
 
 func TestAskGemini(t *testing.T) {
-	assertEchoes(t, "ask_gemini", 90*time.Second)
+	assertEchoes(t, "gemini", 90*time.Second)
 }
 
 func TestAskChatGPT(t *testing.T) {
-	assertEchoes(t, "ask_chatgpt", 2*time.Minute)
+	assertEchoes(t, "chatgpt", 2*time.Minute)
 }
 
-// assertEchoes asks the tool to reply with a sentinel token and checks that the
-// token comes back, which proves the whole chain works: session bootstrap,
+// TestAskBoth exercises the fan-out path: both providers answer concurrently and
+// the result is returned under labeled sections.
+func TestAskBoth(t *testing.T) {
+	sentinel := "PARLEY-ASK-BOTH-OK"
+	got := callTool(t, "ask", map[string]any{
+		"prompt":   "Reply with exactly this token, nothing else: " + sentinel,
+		"provider": "both",
+	}, 2*time.Minute)
+	t.Logf("ask both answered: %q", got)
+
+	if !strings.Contains(got, "## Gemini") || !strings.Contains(got, "## ChatGPT") {
+		t.Fatalf("ask both should include both provider sections: %q", got)
+	}
+	if !strings.Contains(strings.ToUpper(got), sentinel) {
+		t.Fatalf("ask both: answer does not contain %q", sentinel)
+	}
+}
+
+// TestReview drives the review tool end to end through the MCP surface. It
+// omits provider, exercising the default fan-out to both providers.
+func TestReview(t *testing.T) {
+	diff := "--- a/greet.go\n" +
+		"+++ b/greet.go\n" +
+		"@@ -1,3 +1,4 @@\n" +
+		" package main\n \n" +
+		"+var Password = \"hunter2\"\n" +
+		" func main() {}\n"
+	got := callTool(t, "review", map[string]any{
+		"diff":    diff,
+		"context": "A tiny Go program.",
+		"rules":   "Never hard-code secrets in source.",
+	}, 3*time.Minute)
+	t.Logf("review answered: %q", got)
+
+	if !strings.Contains(strings.ToLower(got), "verdict") {
+		t.Fatalf("review missing a verdict: %q", got)
+	}
+	if !strings.Contains(got, "## Gemini") || !strings.Contains(got, "## ChatGPT") {
+		t.Fatalf("review should include both provider sections: %q", got)
+	}
+}
+
+// assertEchoes asks one provider to reply with a sentinel token and checks that
+// the token comes back, which proves the whole chain works: session bootstrap,
 // request signing, streaming, and text extraction.
-func assertEchoes(t *testing.T, tool string, timeout time.Duration) {
+func assertEchoes(t *testing.T, provider string, timeout time.Duration) {
+	t.Helper()
+	sentinel := "PARLEY-" + strings.ToUpper(provider) + "-OK"
+	got := callTool(t, "ask", map[string]any{
+		"prompt":   "Reply with exactly this token, nothing else: " + sentinel,
+		"provider": provider,
+	}, timeout)
+	t.Logf("ask %s answered: %q", provider, got)
+
+	if got == "" {
+		t.Fatalf("ask %s: empty answer", provider)
+	}
+	if !strings.Contains(strings.ToUpper(got), sentinel) {
+		t.Fatalf("ask %s: answer does not contain %q", provider, sentinel)
+	}
+}
+
+// callTool runs tool through a real in-memory MCP client/server pair and returns
+// the concatenated text content.
+func callTool(t *testing.T, tool string, args map[string]any, timeout time.Duration) string {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -46,11 +108,7 @@ func assertEchoes(t *testing.T, tool string, timeout time.Duration) {
 	}
 	defer session.Close()
 
-	sentinel := "PARLEY-" + strings.ToUpper(tool) + "-OK"
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      tool,
-		Arguments: map[string]any{"prompt": "Reply with exactly this token, nothing else: " + sentinel},
-	})
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
 	if err != nil {
 		t.Fatalf("%s: %v", tool, err)
 	}
@@ -61,13 +119,5 @@ func assertEchoes(t *testing.T, tool string, timeout time.Duration) {
 			answer.WriteString(text.Text)
 		}
 	}
-	got := strings.TrimSpace(answer.String())
-	t.Logf("%s answered: %q", tool, got)
-
-	if got == "" {
-		t.Fatalf("%s: empty answer", tool)
-	}
-	if !strings.Contains(strings.ToUpper(got), sentinel) {
-		t.Fatalf("%s: answer does not contain %q", tool, sentinel)
-	}
+	return strings.TrimSpace(answer.String())
 }

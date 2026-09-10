@@ -1,6 +1,6 @@
-// Package chatgpt implements the ask_chatgpt tool: anonymous questions to
-// ChatGPT through the free chatgpt.com web UI, with no API key, account, or
-// browser.
+// Package chatgpt provides anonymous questions to ChatGPT through the free
+// chatgpt.com web UI, with no API key, account, or browser. It is a provider
+// consumed by the ask and review tools; it registers no MCP tools itself.
 package chatgpt
 
 import (
@@ -22,7 +22,6 @@ import (
 
 	"github.com/hangarbay/parley.mcp/internal/extract"
 	"github.com/hangarbay/parley.mcp/internal/httpx"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -30,65 +29,6 @@ const (
 	requestTimeout = 120 * time.Second
 	chatgptHome    = "https://chatgpt.com/"
 )
-
-// Register adds the ask_chatgpt tool and prompt to server.
-func Register(server *mcp.Server) {
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "ask_chatgpt",
-		Description: "Ask ChatGPT a question using the free anonymous web UI. " +
-			"No API key or browser required; session cookies are obtained automatically via the web flow.",
-	}, askHandler)
-	server.AddPrompt(&mcp.Prompt{
-		Name:        "ask_chatgpt",
-		Description: "Ask ChatGPT a question. No API key required.",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "prompt", Description: "The question or prompt to send to ChatGPT", Required: true},
-		},
-	}, askPrompt)
-}
-
-type askArgs struct {
-	Prompt string `json:"prompt" jsonschema:"the question or prompt to send to ChatGPT"`
-}
-
-func askHandler(ctx context.Context, _ *mcp.CallToolRequest, args askArgs) (*mcp.CallToolResult, any, error) {
-	prompt := strings.TrimSpace(args.Prompt)
-	if prompt == "" {
-		return nil, nil, errors.New("prompt is required")
-	}
-
-	text, err := Ask(ctx, prompt)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: text}},
-	}, nil, nil
-}
-
-func askPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-	prompt := ""
-	if req.Params.Arguments != nil {
-		prompt = req.Params.Arguments["prompt"]
-	}
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		return nil, errors.New("prompt is required")
-	}
-
-	text, err := Ask(ctx, prompt)
-	if err != nil {
-		return nil, err
-	}
-
-	return &mcp.GetPromptResult{
-		Description: "ChatGPT: " + prompt,
-		Messages: []*mcp.PromptMessage{
-			{Content: &mcp.TextContent{Text: text}, Role: mcp.Role("user")},
-		},
-	}, nil
-}
 
 // Ask sends prompt to ChatGPT and returns its answer as plain text.
 func Ask(ctx context.Context, prompt string) (string, error) {

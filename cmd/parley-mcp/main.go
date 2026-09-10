@@ -7,11 +7,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
+	"github.com/hangarbay/parley.mcp/internal/ask"
 	"github.com/hangarbay/parley.mcp/internal/chatgpt"
-	"github.com/hangarbay/parley.mcp/internal/gemini"
+	"github.com/hangarbay/parley.mcp/internal/review"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -33,6 +35,8 @@ func run() int {
 		return serveCmd(args)
 	case "probe":
 		return probeCmd(args)
+	case "review":
+		return reviewCmd(args)
 	case "-h", "--help", "help":
 		usage()
 		return 0
@@ -47,26 +51,21 @@ func usage() {
 	fmt.Fprint(os.Stderr, `parley-mcp - ask external AIs (Gemini, ChatGPT) via their free web UIs
 
 Usage:
-  parley-mcp ask -provider gemini|chatgpt [-prompt STRING]   Ask one provider (CLI one-shot)
-  parley-mcp serve                                           Run the MCP stdio server (tools: ask_gemini, ask_chatgpt)
+  parley-mcp ask [-provider gemini|chatgpt|both] [-prompt STRING]  Ask one or both providers (CLI one-shot)
+  parley-mcp review [-provider gemini|chatgpt|both] [-diff FILE] Review a diff, plan, or change
+  parley-mcp serve                                           Run the MCP stdio server (tools: ask, review)
   parley-mcp probe                                           Diagnose the anonymous ChatGPT session
 
 Providers:
   gemini    Google Gemini (AI Mode). Bootstraps a session via headless Firefox; set FIREFOX_PATH to override.
   chatgpt   ChatGPT anonymous web UI. No browser required; sessions are cached under the user cache dir.
+  both      Query both concurrently and label the answers (the default).
 `)
-}
-
-func providers() map[string]func(context.Context, string) (string, error) {
-	return map[string]func(context.Context, string) (string, error){
-		"gemini":  gemini.Ask,
-		"chatgpt": chatgpt.Ask,
-	}
 }
 
 func askCmd(args []string) int {
 	fs := flag.NewFlagSet("ask", flag.ContinueOnError)
-	provider := fs.String("provider", "gemini", "which provider to ask: gemini or chatgpt")
+	provider := fs.String("provider", "both", "which providers to ask: gemini, chatgpt, or both")
 	prompt := fs.String("prompt", "", "the question or prompt to send")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -81,13 +80,7 @@ func askCmd(args []string) int {
 		return 2
 	}
 
-	ask, ok := providers()[strings.ToLower(*provider)]
-	if !ok {
-		fmt.Fprintf(os.Stderr, "unknown provider %q (want gemini or chatgpt)\n", *provider)
-		return 2
-	}
-
-	text, err := ask(context.Background(), *prompt)
+	text, err := ask.Run(context.Background(), *prompt, *provider)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 1
@@ -108,16 +101,63 @@ func serveCmd(args []string) int {
 	return 0
 }
 
-// newServer builds the MCP server with every provider registered.
+// newServer builds the MCP server with every tool registered.
 func newServer() *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "parley",
 		Title:   "Parley MCP",
 		Version: "0.1.0",
 	}, nil)
-	gemini.Register(server)
-	chatgpt.Register(server)
+	ask.Register(server)
+	review.Register(server)
 	return server
+}
+
+func reviewCmd(args []string) int {
+	fs := flag.NewFlagSet("review", flag.ContinueOnError)
+	provider := fs.String("provider", "both", "which providers review the change: gemini, chatgpt, or both")
+	contextStr := fs.String("context", "", "project context to ground the review")
+	rules := fs.String("rules", "", "rules or conventions the change must follow")
+	diffFile := fs.String("diff", "", "path to a file holding the diff, or - for stdin")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	diff, err := readDiff(*diffFile)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+
+	text, err := review.Run(context.Background(), review.Options{
+		Diff:     diff,
+		Context:  *contextStr,
+		Rules:    *rules,
+		Provider: *provider,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	fmt.Println(text)
+	return 0
+}
+
+// readDiff reads the diff from a file, or from stdin when no path (or "-") is
+// given.
+func readDiff(path string) (string, error) {
+	if path != "" && path != "-" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func probeCmd(args []string) int {
