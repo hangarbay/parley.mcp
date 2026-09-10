@@ -653,5 +653,5 @@ func extractText(fragment string) string {
 	if fragment == "" {
 		return ""
 	}
-	return extract.DedupeLines(extract.Strip(extract.Nodes(fragment, extract.KeepTemplates), chatgptBoilerplate...))
+	return extract.DedupeLines(extract.Strip(extract.Nodes(fragment, extract.Stream), chatgptBoilerplate...))
 }

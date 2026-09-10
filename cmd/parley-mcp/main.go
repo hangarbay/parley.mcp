@@ -101,6 +101,15 @@ func serveCmd(args []string) int {
 		fmt.Fprintf(os.Stderr, "unknown argument %q (serve takes no flags)\n", args[0])
 		return 2
 	}
+	if err := newServer().Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	return 0
+}
+
+// newServer builds the MCP server with every provider registered.
+func newServer() *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "parley",
 		Title:   "Parley MCP",
@@ -108,11 +117,7 @@ func serveCmd(args []string) int {
 	}, nil)
 	gemini.Register(server)
 	chatgpt.Register(server)
-	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		return 1
-	}
-	return 0
+	return server
 }
 
 func probeCmd(args []string) int {
