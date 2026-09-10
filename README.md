@@ -1,10 +1,15 @@
 # parley.mcp
 
 An MCP server that lets an AI agent consult external AIs for a second opinion,
-with no API keys. **parley** exposes two tools:
+with no API keys. **parley** exposes five tools:
 
 - **`ask`** — ask one or both providers a question. Selecting both fans out
   concurrently and returns labeled answers.
+- **`decide`** — choose exactly one option from an explicitly enumerated list
+  against explicit criteria, and commit to a recommendation.
+- **`diagnose`** — given a failure with observations and attempted fixes, rank
+  competing causes and propose tests that distinguish them.
+- **`plan`** — turn a project or task into an ordered, phased breakdown.
 - **`review`** — send a git diff, plan, or code change to one or both providers
   with project context and rules, and get back structured review verdicts.
 
@@ -16,14 +21,37 @@ The two providers are:
   HTTP, no browser required.
 
 Providers are self-contained packages under `internal/`; `internal/dispatch`
-runs them concurrently, and the tools in `internal/ask` and `internal/review`
-build prompts and format results. The server in `cmd/parley-mcp` only wires
-everything together.
+runs them concurrently, and the tool packages (`internal/ask`, `internal/decide`,
+`internal/diagnose`, `internal/plan`, `internal/review`) build prompts and format
+results. The server in `cmd/parley-mcp` only wires everything together.
 
 ## Tools
 
 - **`ask`** — Ask one or more providers a question.
   - `prompt` (string, required): the question or prompt
+  - `provider` (string, optional): `gemini`, `chatgpt`, or `both` (default `both`)
+- **`decide`** — Choose exactly one option from an explicitly enumerated list
+  against explicit criteria, and commit to it. Use when the alternatives are
+  already known.
+  - `question` (string, required): the decision to make
+  - `options` (string, required): the alternatives to choose between, one per line
+  - `criteria` (string, optional): criteria the choice must be judged against
+  - `constraints` (string, optional): hard constraints the choice must satisfy
+  - `context` (string, optional): project context to ground the decision
+  - `provider` (string, optional): `gemini`, `chatgpt`, or `both` (default `both`)
+- **`diagnose`** — Given a failure with observations and attempted fixes, rank
+  competing causes and propose tests that distinguish them.
+  - `problem` (string, required): the failure or unexpected behavior observed
+  - `observations` (string, optional): logs, errors, or measurements gathered so far
+  - `attempts` (string, optional): fixes already tried and what happened
+  - `environment` (string, optional): relevant environment or version details
+  - `context` (string, optional): project context to ground the diagnosis
+  - `provider` (string, optional): `gemini`, `chatgpt`, or `both` (default `both`)
+- **`plan`** — Plan a project, task, or feature and get back a structured
+  breakdown (goal, numbered phases with steps and deliverables, risks, open
+  questions).
+  - `task` (string, required): the project or task to plan
+  - `context` (string, optional): project context to ground the plan
   - `provider` (string, optional): `gemini`, `chatgpt`, or `both` (default `both`)
 - **`review`** — Review a git diff, plan, or code change and return a verdict
   (`APPROVE` / `REQUEST_CHANGES` / `NEEDS_DISCUSSION`) with specific findings.
@@ -73,6 +101,9 @@ CLI one-shots:
 ```bash
 go run ./cmd/parley-mcp ask -prompt "what is the capital of France"         # both providers
 go run ./cmd/parley-mcp ask -provider gemini -prompt "..."                 # just one
+go run ./cmd/parley-mcp decide -question "which datastore" -options "postgres, sqlite" -criteria "operational burden"
+go run ./cmd/parley-mcp diagnose -problem "requests time out under load" -observations "p99 5s, CPU normal"
+go run ./cmd/parley-mcp plan -task "migrate the CLI to cobra"              # ordered phases
 go run ./cmd/parley-mcp review -diff changes.diff                          # review a diff (both providers)
 go run ./cmd/parley-mcp review -provider chatgpt -diff changes.diff        # just one
 go run ./cmd/parley-mcp probe   # diagnose the anonymous ChatGPT session
