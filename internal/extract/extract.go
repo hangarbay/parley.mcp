@@ -25,18 +25,22 @@ var blockElements = map[string]bool{
 
 // Options tweaks the flattening for a provider's response shape.
 type Options struct {
-	// SkipTemplate drops <template> subtrees. The ChatGPT partial-update
-	// stream wraps every visible element in <template>, so it must keep them.
+	// SkipTemplate drops <template> subtrees. Gemini's AI Mode layout uses
+	// empty scaffolding templates that carry no answer text.
 	SkipTemplate bool
+	// SkipPending drops <template for="...-pending"> subtrees. ChatGPT's
+	// partial-update stream replays every frame it emitted, so the live
+	// "-pending" frames carry prefixes of the answer that the later committed
+	// frames replace.
+	SkipPending bool
 }
 
-// KeepTemplates is the default flattening behavior. The ChatGPT stream needs
-// it, since its content lives inside <template> elements.
-var KeepTemplates = Options{}
+// Stream keeps <template> wrappers but ignores the live "-pending" frames,
+// leaving only committed content. Used for ChatGPT's partial-update stream.
+var Stream = Options{SkipPending: true}
 
-// SkipTemplates also drops <template> subtrees. Gemini's AI Mode layout uses
-// empty scaffolding templates that carry no answer text.
-var SkipTemplates = Options{SkipTemplate: true}
+// Static drops <template> scaffolding entirely. Used for Gemini's AI Mode page.
+var Static = Options{SkipTemplate: true}
 
 // Nodes parses an HTML fragment and returns its text content with block
 // elements separated by newlines and runs of whitespace collapsed.
@@ -61,8 +65,8 @@ func Strip(text string, patterns ...*regexp.Regexp) string {
 	return strings.TrimSpace(text)
 }
 
-// DedupeLines removes consecutive duplicate lines. Streaming UIs resend the
-// same paragraph in both the pending and committed frames.
+// DedupeLines removes consecutive duplicate lines. Streaming UIs can resend the
+// same paragraph across frames.
 func DedupeLines(text string) string {
 	lines := strings.Split(text, "\n")
 	out := make([]string, 0, len(lines))
@@ -81,7 +85,7 @@ func walk(n *html.Node, buf *strings.Builder, opts Options) {
 		case "script", "style", "noscript":
 			return
 		case "template":
-			if opts.SkipTemplate {
+			if opts.SkipTemplate || (opts.SkipPending && isPending(n)) {
 				return
 			}
 		case "br":
@@ -104,4 +108,16 @@ func walk(n *html.Node, buf *strings.Builder, opts Options) {
 	if n.Type == html.ElementNode && blockElements[n.Data] {
 		buf.WriteByte('\n')
 	}
+}
+
+// isPending reports whether a node is one of ChatGPT's live streaming frames.
+// Their "for" target ends in "-pending"; a later committed frame replaces them
+// with the final text.
+func isPending(n *html.Node) bool {
+	for _, a := range n.Attr {
+		if a.Key == "for" {
+			return strings.HasSuffix(a.Val, "-pending")
+		}
+	}
+	return false
 }

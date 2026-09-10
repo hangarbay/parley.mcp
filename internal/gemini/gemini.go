@@ -273,11 +273,14 @@ var geminiBoilerplate = []*regexp.Regexp{
 	regexp.MustCompile(`\n*Copy\s*\nShare public link\s*\n[\s\S]*$`),
 	regexp.MustCompile(`\n*Good response\s*\nBad response\s*\n[\s\S]*$`),
 	regexp.MustCompile(`\n*Show less\s*\nShow all\s*\n*$`),
+	// The clipboard widget that trails every reply. Matched as a specific pair
+	// so an answer that merely mentions "Copied to clipboard" survives.
+	regexp.MustCompile(`\n*Copied to clipboard\s+Failed to copy to clipboard\. Try again later\.[\s\S]*$`),
 }
 
 func extractText(fragment string) string {
 	if fragment == "" {
 		return ""
 	}
-	return extract.Strip(extract.Nodes(fragment, extract.SkipTemplates), geminiBoilerplate...)
+	return extract.Strip(extract.Nodes(fragment, extract.Static), geminiBoilerplate...)
 }
