@@ -1,22 +1,41 @@
 # parley.mcp
 
-An MCP server that lets an AI agent consult an external AI for a second
-opinion, with no API keys. **parley** exposes two tools:
+An MCP server that lets an AI agent consult external AIs for a second opinion,
+with no API keys. **parley** exposes two tools:
 
-- **`ask_gemini`** — Google Gemini (AI Mode) through the free `google.com`
-  web UI. Uses headless Firefox to bootstrap session cookies.
-- **`ask_chatgpt`** — ChatGPT through the free anonymous `chatgpt.com` web
-  UI. Plain HTTP, no browser required.
+- **`ask`** — ask one or both providers a question. Selecting both fans out
+  concurrently and returns labeled answers.
+- **`review`** — send a git diff, plan, or code change to one or both providers
+  with project context and rules, and get back structured review verdicts.
 
-Both providers are self-contained packages under `internal/`; the MCP server
-in `cmd/parley-mcp` only wires them together.
+The two providers are:
+
+- **gemini** — Google Gemini (AI Mode) through the free `google.com` web UI.
+  Uses headless Firefox to bootstrap session cookies.
+- **chatgpt** — ChatGPT through the free anonymous `chatgpt.com` web UI. Plain
+  HTTP, no browser required.
+
+Providers are self-contained packages under `internal/`; `internal/dispatch`
+runs them concurrently, and the tools in `internal/ask` and `internal/review`
+build prompts and format results. The server in `cmd/parley-mcp` only wires
+everything together.
 
 ## Tools
 
-- **`ask_gemini`** — Ask Gemini a question.
+- **`ask`** — Ask one or more providers a question.
   - `prompt` (string, required): the question or prompt
-- **`ask_chatgpt`** — Ask ChatGPT a question.
-  - `prompt` (string, required): the question or prompt
+  - `provider` (string, optional): `gemini`, `chatgpt`, or `both` (default `both`)
+- **`review`** — Review a git diff, plan, or code change and return a verdict
+  (`APPROVE` / `REQUEST_CHANGES` / `NEEDS_DISCUSSION`) with specific findings.
+  - `diff` (string, required): the unified diff (`git diff`), or the plan text for a plan review
+  - `context` (string, optional): project context to ground the review
+  - `rules` (string, optional): rules or conventions the change must follow
+  - `provider` (string, optional): `gemini`, `chatgpt`, or `both` (default `both`)
+
+When both providers are selected they run concurrently, so the call costs about
+as long as the slower one. A failure in one provider does not discard the other:
+failed providers are annotated inline and the call only errors if every provider
+fails. Asking a single provider returns its answer with no section header.
 
 ## Usage
 
@@ -52,9 +71,12 @@ go run ./cmd/parley-mcp serve
 CLI one-shots:
 
 ```bash
-go run ./cmd/parley-mcp ask -provider gemini  -prompt "what is the capital of France"
-go run ./cmd/parley-mcp ask -provider chatgpt -prompt "what is the capital of France"
+go run ./cmd/parley-mcp ask -prompt "what is the capital of France"         # both providers
+go run ./cmd/parley-mcp ask -provider gemini -prompt "..."                 # just one
+go run ./cmd/parley-mcp review -diff changes.diff                          # review a diff (both providers)
+go run ./cmd/parley-mcp review -provider chatgpt -diff changes.diff        # just one
 go run ./cmd/parley-mcp probe   # diagnose the anonymous ChatGPT session
+cat changes.diff | go run ./cmd/parley-mcp review                          # or pipe it on stdin
 ```
 
 ## Providers

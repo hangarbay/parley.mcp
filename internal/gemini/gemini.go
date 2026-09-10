@@ -1,5 +1,6 @@
-// Package gemini implements the ask_gemini tool: anonymous questions to Google
-// Gemini (AI Mode) through the free web UI, with no API key.
+// Package gemini provides anonymous questions to Google Gemini (AI Mode)
+// through the free web UI, with no API key. It is a provider consumed by the
+// ask and review tools; it registers no MCP tools itself.
 package gemini
 
 import (
@@ -9,78 +10,17 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/hangarbay/parley.mcp/internal/extract"
 	"github.com/hangarbay/parley.mcp/internal/httpx"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
 	firefoxUA      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:154.0) Gecko/20100101 Firefox/154.0"
 	requestTimeout = 60 * time.Second
 )
-
-// Register adds the ask_gemini tool and prompt to server.
-func Register(server *mcp.Server) {
-	mcp.AddTool(server, &mcp.Tool{
-		Name: "ask_gemini",
-		Description: "Ask Google Gemini (AI Mode) a question using the free web UI. " +
-			"No API key required; a session is bootstrapped automatically via headless Firefox on first use.",
-	}, askHandler)
-	server.AddPrompt(&mcp.Prompt{
-		Name:        "ask_gemini",
-		Description: "Ask Google Gemini (AI Mode) a question. No API key required.",
-		Arguments: []*mcp.PromptArgument{
-			{Name: "prompt", Description: "The question or prompt to send to Gemini", Required: true},
-		},
-	}, askPrompt)
-}
-
-type askArgs struct {
-	Prompt string `json:"prompt" jsonschema:"the question or prompt to send to Gemini"`
-}
-
-func askHandler(ctx context.Context, _ *mcp.CallToolRequest, args askArgs) (*mcp.CallToolResult, any, error) {
-	prompt := strings.TrimSpace(args.Prompt)
-	if prompt == "" {
-		return nil, nil, errors.New("prompt is required")
-	}
-
-	text, err := Ask(ctx, prompt)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: text}},
-	}, nil, nil
-}
-
-func askPrompt(ctx context.Context, req *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-	prompt := ""
-	if req.Params.Arguments != nil {
-		prompt = req.Params.Arguments["prompt"]
-	}
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
-		return nil, errors.New("prompt is required")
-	}
-
-	text, err := Ask(ctx, prompt)
-	if err != nil {
-		return nil, err
-	}
-
-	return &mcp.GetPromptResult{
-		Description: "Gemini: " + prompt,
-		Messages: []*mcp.PromptMessage{
-			{Content: &mcp.TextContent{Text: text}, Role: mcp.Role("user")},
-		},
-	}, nil
-}
 
 // Ask sends prompt to Gemini and returns its answer as plain text.
 func Ask(ctx context.Context, prompt string) (string, error) {
