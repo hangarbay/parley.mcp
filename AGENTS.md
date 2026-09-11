@@ -25,6 +25,7 @@ make build            # go build -o parley-mcp ./cmd/parley-mcp
 make test             # go vet ./... && go test ./...
 make integ            # integration tests: go test -tags=integration -count=1 -timeout 5m -v ./cmd/parley-mcp/
 make docker           # docker build -t parley.mcp:local .
+make update           # pull hangarbay/parley.mcp:latest and restart the parley container on it
 
 go run ./cmd/parley-mcp serve                 # MCP stdio server (the production entrypoint)
 go run ./cmd/parley-mcp ask -prompt "..."                    # both providers (default)
@@ -45,6 +46,11 @@ go run ./cmd/parley-mcp probe                 # step-by-step diagnostic of the a
 - `make integ` hits live providers and needs network access; the Gemini case
   also needs Firefox. It drives both providers through the real MCP surface
   (in-memory transport) and asserts a sentinel token comes back in the answer.
+- `make update` is the redeploy cycle: `docker pull` the published
+  `hangarbay/parley.mcp:latest` (built by CI on each push to main), force-remove
+  the existing `parley` container, and start a fresh one with `-i` (the server
+  speaks stdio). Container and image names are overridable via `CONTAINER=` and
+  `IMAGE=`.
 - `serve` takes no flags and communicates over stdio. The Docker image's
   entrypoint is `parley-mcp serve`.
 - GitHub Actions (`docker.yml`) builds **multi-arch** images
