@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
@@ -109,41 +110,40 @@ func FanOut(ctx context.Context, prompt string, names []string) []Result {
 	return results
 }
 
-// Format renders results as labeled sections. Failed providers are annotated
-// inline rather than dropped; Format errors only when every provider failed. A
-// single successful provider is returned without a header.
+// Format renders the successful results and drops any failed provider. Failures
+// are logged to stderr so they stay out of the caller's answer. A single
+// surviving provider is returned without a header; multiple survivors are
+// labeled. When every provider fails, Format returns an empty string and no
+// error, so a total outage reads as an empty answer rather than a failure.
 func Format(results []Result) (string, error) {
 	if len(results) == 0 {
 		return "", errors.New("no providers requested")
 	}
-	if len(results) == 1 {
-		r := results[0]
+
+	var ok []Result
+	for _, r := range results {
 		if r.Err != nil {
-			return "", fmt.Errorf("%s: %w", r.Provider, r.Err)
+			log.Printf("parley: provider %s failed: %v", r.Provider, r.Err)
+			continue
 		}
-		return strings.TrimSpace(r.Text), nil
+		ok = append(ok, r)
+	}
+	if len(ok) == 0 {
+		return "", nil
+	}
+	if len(ok) == 1 {
+		return strings.TrimSpace(ok[0].Text), nil
 	}
 
 	var b strings.Builder
-	var failures []string
-	for i, r := range results {
+	for i, r := range ok {
 		if i > 0 {
 			b.WriteString("\n\n")
 		}
 		b.WriteString("## ")
 		b.WriteString(r.Title)
 		b.WriteString("\n\n")
-		if r.Err != nil {
-			b.WriteString("_unavailable: ")
-			b.WriteString(r.Err.Error())
-			b.WriteString("_")
-			failures = append(failures, fmt.Sprintf("%s: %v", r.Provider, r.Err))
-			continue
-		}
 		b.WriteString(strings.TrimSpace(r.Text))
-	}
-	if len(failures) == len(results) {
-		return "", fmt.Errorf("all providers failed: %s", strings.Join(failures, "; "))
 	}
 	return b.String(), nil
 }

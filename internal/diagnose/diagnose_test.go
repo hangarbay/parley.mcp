@@ -159,12 +159,12 @@ func TestRunBestEffortKeepsSurvivors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if !strings.Contains(out, "DNS") || !strings.Contains(out, "_unavailable: no firefox_") {
-		t.Fatalf("unexpected output %q", out)
+	if out != "1. Most likely cause: DNS" {
+		t.Fatalf("got %q, want the surviving provider's answer", out)
 	}
 }
 
-func TestRunAllProvidersFailed(t *testing.T) {
+func TestRunAllProvidersFailedReturnsEmpty(t *testing.T) {
 	restore := stubFanOut(func(_ context.Context, _ string, _ []string) []dispatch.Result {
 		return []dispatch.Result{
 			{Provider: "gemini", Title: "Gemini", Err: errors.New("no firefox")},
@@ -173,7 +173,11 @@ func TestRunAllProvidersFailed(t *testing.T) {
 	})
 	defer restore()
 
-	if _, err := Run(context.Background(), Options{Problem: "timeouts"}); err == nil {
-		t.Fatal("expected error when all providers fail")
+	out, err := Run(context.Background(), Options{Problem: "timeouts"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out != "" {
+		t.Fatalf("got %q, want empty", out)
 	}
 }
