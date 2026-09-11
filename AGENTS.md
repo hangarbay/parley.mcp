@@ -110,8 +110,9 @@ independent); the conduit token and requirements token are combined before
 - Holds the provider `registry` (name + title + `Ask` func). `Resolve` turns a
   request string (`""`/`both`/`all`, or a comma list) into validated names;
   `FanOut` runs every named provider in its own goroutine and returns results in
-  request order; `Format` renders single answers bare and multi answers under
-  `## Gemini` / `## ChatGPT` headings, annotating unavailable providers inline.
+  request order; `Format` logs failed providers to stderr, drops them, renders a
+  lone survivor bare and multiple survivors under `## Gemini` / `## ChatGPT`
+  headings, and returns an empty answer when every provider failed.
 - `registry` (dispatch) and `fanOut` (every tool package) are package vars so
   tests can substitute fakes without network access.
 
@@ -140,8 +141,10 @@ independent); the conduit token and requirements token are combined before
 - **Fan-out is best-effort and order-preserving.** `dispatch.FanOut` uses one
   goroutine per provider; a failure in one is captured in that `Result.Err` and
   never cancels the others. Results are indexed by request position, not map
-  iteration, so output order is deterministic. `Format` errors only when every
-  provider failed, and a single provider's answer is returned without a header.
+  iteration, so output order is deterministic. `Format` never surfaces a
+  provider's error to the caller: it logs failures to stderr, drops them from
+  the answer, and returns an empty string when every provider failed. A single
+  surviving provider is returned without a header.
 - **Every provider request goes through `httpx.ReadBody`**, not `io.ReadAll` —
   the servers gzip responses and Go's transport does not auto-decompress.
 - **The two providers use different User-Agent constants** (gemini:

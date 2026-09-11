@@ -146,14 +146,17 @@ func TestFormatSingleSuccessHasNoHeader(t *testing.T) {
 	}
 }
 
-func TestFormatSingleFailure(t *testing.T) {
-	_, err := Format([]Result{{Provider: "alpha", Title: "Alpha", Err: errors.New("boom")}})
-	if err == nil {
-		t.Fatal("expected error")
+func TestFormatSingleFailureIsEmpty(t *testing.T) {
+	got, err := Format([]Result{{Provider: "alpha", Title: "Alpha", Err: errors.New("boom")}})
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("got %q, want empty", got)
 	}
 }
 
-func TestFormatMultipleLabelsAndAnnotates(t *testing.T) {
+func TestFormatDropsFailedProvider(t *testing.T) {
 	got, err := Format([]Result{
 		{Provider: "alpha", Title: "Alpha", Text: "answer a"},
 		{Provider: "beta", Title: "Beta", Err: errors.New("no firefox")},
@@ -161,21 +164,41 @@ func TestFormatMultipleLabelsAndAnnotates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Format: %v", err)
 	}
-	if !strings.Contains(got, "## Alpha") || !strings.Contains(got, "answer a") {
-		t.Fatalf("missing alpha section: %q", got)
+	if !strings.Contains(got, "answer a") {
+		t.Fatalf("missing alpha answer: %q", got)
 	}
-	if !strings.Contains(got, "## Beta") || !strings.Contains(got, "_unavailable: no firefox_") {
-		t.Fatalf("missing beta annotation: %q", got)
+	if strings.Contains(got, "Beta") || strings.Contains(got, "_unavailable") {
+		t.Fatalf("failed provider leaked into output: %q", got)
 	}
 }
 
-func TestFormatAllFailed(t *testing.T) {
-	_, err := Format([]Result{
+func TestFormatMultipleSurvivorsLabeled(t *testing.T) {
+	got, err := Format([]Result{
+		{Provider: "alpha", Title: "Alpha", Text: "a"},
+		{Provider: "beta", Title: "Beta", Text: "b"},
+		{Provider: "gamma", Title: "Gamma", Err: errors.New("boom")},
+	})
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if !strings.Contains(got, "## Alpha") || !strings.Contains(got, "## Beta") {
+		t.Fatalf("expected labeled sections: %q", got)
+	}
+	if strings.Contains(got, "Gamma") {
+		t.Fatalf("failed provider leaked: %q", got)
+	}
+}
+
+func TestFormatAllFailedIsEmpty(t *testing.T) {
+	got, err := Format([]Result{
 		{Provider: "alpha", Title: "Alpha", Err: errors.New("boom")},
 		{Provider: "beta", Title: "Beta", Err: errors.New("bang")},
 	})
-	if err == nil {
-		t.Fatal("expected error when all providers fail")
+	if err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("got %q, want empty", got)
 	}
 }
 
