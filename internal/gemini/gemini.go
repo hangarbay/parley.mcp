@@ -38,6 +38,19 @@ func checkRequestURL(reqURL string) error {
 	return nil
 }
 
+// searchStatusError explains a non-200 search response. Google answers
+// anonymous automated traffic with 429 and a CAPTCHA page, which the caller
+// would otherwise surface as the misleading "cookies may be expired".
+func searchStatusError(status int, body string) error {
+	if status == http.StatusOK {
+		return nil
+	}
+	if status == http.StatusTooManyRequests {
+		return errors.New("google returned 429 (anonymous traffic rate-limited or challenged with a CAPTCHA); retry later or use another provider")
+	}
+	return fmt.Errorf("search page returned status %d: %s", status, body[:min(len(body), 200)])
+}
+
 // Ask sends prompt to Gemini and returns its answer as plain text.
 func Ask(ctx context.Context, prompt string) (string, error) {
 	return sharedClient.ask(ctx, prompt)
@@ -122,6 +135,10 @@ func (c *geminiClient) fetchTokens(ctx context.Context, prompt string) (map[stri
 	}
 	page := string(body)
 
+	if err := searchStatusError(resp.StatusCode, page); err != nil {
+		return nil, err
+	}
+
 	tokens := make(map[string]string)
 	for _, m := range reDataTokens.FindAllStringSubmatch(page, -1) {
 		if len(m) == 3 {
@@ -144,7 +161,7 @@ func (c *geminiClient) fetchTokens(ctx context.Context, prompt string) (map[stri
 	}
 
 	if _, ok := tokens["ei"]; !ok {
-		return nil, fmt.Errorf("missing required tokens from search page; cookies may be expired or invalid (got %d tokens)", len(tokens))
+		return nil, fmt.Errorf("missing AI Mode tokens in search page (got %d); Google may have served a consent or reduced page", len(tokens))
 	}
 	return tokens, nil
 }
