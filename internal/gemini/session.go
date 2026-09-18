@@ -73,9 +73,13 @@ func bootstrapFirefox(ctx context.Context) (string, error) {
 	go func() { done <- cmd.Wait() }()
 
 	select {
-	case <-time.After(15 * time.Second):
+	case <-time.After(5 * time.Second):
+		// Headless Firefox parks instead of exiting once the page settles, so
+		// it nearly always hits this case: the cookie store is written long
+		// before the process would die, so interrupt, give it a moment to
+		// flush, then kill. Waiting for a clean exit costs 10+ extra seconds.
 		cmd.Process.Signal(os.Interrupt)
-		time.Sleep(2 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 		cmd.Process.Kill()
 	case err := <-done:
 		if err != nil {
