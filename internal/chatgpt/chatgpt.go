@@ -99,6 +99,11 @@ func (c *client) ask(ctx context.Context, prompt string) (string, error) {
 	}()
 	wg.Wait()
 	if prepErr != nil {
+		if strings.Contains(prepErr.Error(), "Invalid conversation document affinity") {
+			c.mu.Lock()
+			c.home = nil
+			c.mu.Unlock()
+		}
 		return "", fmt.Errorf("prepare: %w", prepErr)
 	}
 	if sentErr != nil {
